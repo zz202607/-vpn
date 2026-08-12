@@ -8,7 +8,21 @@ Desktop.ini
 .idea/
 *.swp
 
-# Secrets and local config — never commit these
+# Secrets and subscription data — never commit these
 *.key
 *.pem
 .env
+subscription.txt
+*.sub
+config/*.yaml
+!config/*.example.yaml
+
+# Core binaries and archives (mihomo kernel is downloaded on demand)
+core/*.exe
+core/*.zip
+
+# Logs
+*.log
+
+# Claude Code local settings
+.claude/settings.local.json
