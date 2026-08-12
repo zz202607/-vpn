@@ -21,6 +21,14 @@ config/*.yaml
 core/*.exe
 core/*.zip
 
+# Geo data files (auto-downloaded on first run)
+config/*.mmdb
+config/*.metadb
+config/*.dat
+
+# Python
+__pycache__/
+
 # Logs
 *.log
 
