@@ -1,0 +1,14 @@
+# OS junk files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Secrets and local config — never commit these
+*.key
+*.pem
+.env
