@@ -35,3 +35,8 @@ __pycache__/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Build artifacts (PyInstaller) and packaged exe (binary, not committed)
+build/
+dist/
+/极简VPN.exe

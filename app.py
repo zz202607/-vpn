@@ -27,7 +27,11 @@ import threading
 import time
 import urllib.request
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# 打包为 exe 后 __file__ 指向临时解压目录，改用 exe 所在目录定位 core/ 与 config/
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MIHOMO_EXE = os.path.join(BASE_DIR, "core", "mihomo.exe")
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.yaml")
@@ -545,6 +549,11 @@ def selftest():
 
 
 def main():
+    # 窗口化打包（无控制台）时 stdout/stderr 为 None，重定向到空设备防崩溃
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
     # 控制台编码兜底：遇到无法编码的字符时替换而不是崩溃
     if hasattr(sys.stdout, "reconfigure"):
         try:

@@ -33,3 +33,6 @@ description: 本项目的首席工程师。凡涉及技术方案、依赖选型�
 - 仓库：D:\my-project\-vpn（分支 main），远程 https://github.com/zz202607/-vpn.git 已连通，凭据已保存。
 - core/ 目录存放 mihomo 内核（二进制不入 git）。
 - 用户环境：Windows，Git Bash（POSIX sh，用 Unix 语法与 /d/... 路径），Python 3.13.14 在 C:\Users\33247\AppData\Local\Programs\Python\Python313\python.exe（PATH 里第一个 python 是个有问题的包装脚本，调用时避开）。
+- 2026-08-12 里程碑：`--selftest` 端到端全绿（内核就绪 → 代理生效 → Google HTTP 200 → 断开无残留）。
+- 订阅更新：订阅服务对 User-Agent `clash.meta` 直接返回完整 mihomo 配置（含规则与分组），无需第三方转换。`update_subscription()` 原子替换 config.yaml + 安全补丁；GUI 有「更新订阅」按钮，已连接时自动重启内核。
+- 打包：根目录 `极简VPN.exe`（PyInstaller --onefile --windowed，不入 git）。frozen 模式下 BASE_DIR 取 exe 目录，exe 必须与 core/、config/ 同级。
