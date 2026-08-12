@@ -21,10 +21,11 @@ config/*.yaml
 core/*.exe
 core/*.zip
 
-# Geo data files (auto-downloaded on first run)
+# Geo data files (auto-downloaded on first run) and mihomo runtime cache
 config/*.mmdb
 config/*.metadb
 config/*.dat
+config/*.db
 
 # Python
 __pycache__/
