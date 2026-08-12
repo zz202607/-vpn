@@ -4,15 +4,18 @@
 基于 mihomo (Clash Meta) 内核：
 - 连接 = 启动 core/mihomo.exe（子进程、隐藏窗口）+ 打开 Windows 系统代理
 - 断开 = 结束 mihomo 进程树 + 关闭系统代理（立即广播，3 秒内恢复上网）
+- 更新订阅 = 从订阅链接重新拉取完整配置；已连接时自动重启内核使新节点生效
 
 安全策略：
 - 启动内核前强制把配置改为仅本机监听（allow-lan / bind-address / dns listen）
+- 订阅响应异常（非有效配置）时保留原配置不动
 - 程序启动时若发现系统代理开着但内核没在跑，自动清掉残留代理
 - 程序退出（含异常退出）时自动清理代理并结束内核
 
 用法：
     python app.py            # 打开图形界面
     python app.py --selftest # 无界面端到端自检（连接 -> 访问 Google -> 断开）
+    python app.py --update   # 无界面更新订阅（刷新节点列表）
 """
 
 import atexit
@@ -28,6 +31,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MIHOMO_EXE = os.path.join(BASE_DIR, "core", "mihomo.exe")
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.yaml")
+SUBSCRIPTION_FILE = os.path.join(CONFIG_DIR, "subscription.txt")
+
+SUB_USER_AGENT = "clash.meta"  # 订阅服务对该 UA 返回完整的 mihomo 配置
 
 PROXY_ADDR = "127.0.0.1:7890"
 CONTROLLER_URL = "http://127.0.0.1:9090/version"
@@ -92,6 +98,47 @@ def ensure_geo_data(log=print):
                 continue
         else:
             raise RuntimeError(f"地理数据文件 {name} 下载失败，内核无法启动，请检查网络后重试")
+
+
+# ---------------------------------------------------------------------------
+# 订阅更新：从订阅链接重新拉取完整配置（原子写盘 + 安全补丁）
+# ---------------------------------------------------------------------------
+
+def _read_subscription_url():
+    try:
+        with open(SUBSCRIPTION_FILE, encoding="utf-8") as f:
+            url = f.read().strip()
+    except OSError:
+        raise RuntimeError(f"找不到订阅文件：{SUBSCRIPTION_FILE}，"
+                           "请把订阅链接保存为该文件后重试")
+    if not url.startswith(("http://", "https://")):
+        raise RuntimeError("订阅文件内容不是有效的订阅链接")
+    return url
+
+
+def update_subscription(log=print):
+    """拉取订阅配置并原子替换 config.yaml，返回节点数量。
+
+    订阅响应异常时不改动现有配置。
+    """
+    url = _read_subscription_url()
+    log("正在获取订阅…")
+    req = urllib.request.Request(url, headers={"User-Agent": SUB_USER_AGENT})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        text = resp.read().decode("utf-8", errors="replace")
+    # 防御：订阅服务异常时可能返回错误页，绝不能覆盖可用配置
+    if "mixed-port" not in text or not re.search(r"^proxies:\s*$", text, re.M):
+        raise RuntimeError("订阅返回的内容不是有效配置，原配置保持不变")
+    tmp_path = CONFIG_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    os.replace(tmp_path, CONFIG_FILE)
+    patch_config(log)
+    proxies_block = re.search(r"^proxies:\s*$(.*?)^proxy-groups:", text,
+                              re.M | re.S)
+    node_count = (len(re.findall(r"-\s*\{\s*name:", proxies_block.group(1)))
+                  if proxies_block else 0)
+    return node_count
 
 
 # ---------------------------------------------------------------------------
@@ -250,11 +297,17 @@ def run_gui():
                                     anchor="w", font=("Microsoft YaHei", 11))
             status_label.pack(fill="x", padx=12, pady=(12, 4))
 
+            btn_frame = tk.Frame(self.root)
+            btn_frame.pack(pady=6)
             self.button_var = tk.StringVar(value="连接")
-            self.toggle_button = tk.Button(self.root, textvariable=self.button_var,
-                                           command=self.on_toggle, width=16,
+            self.toggle_button = tk.Button(btn_frame, textvariable=self.button_var,
+                                           command=self.on_toggle, width=12,
                                            font=("Microsoft YaHei", 10))
-            self.toggle_button.pack(pady=6)
+            self.toggle_button.pack(side="left", padx=8)
+            self.update_button = tk.Button(btn_frame, text="更新订阅",
+                                           command=self.on_update, width=12,
+                                           font=("Microsoft YaHei", 10))
+            self.update_button.pack(side="left", padx=8)
 
             log_frame = tk.Frame(self.root)
             log_frame.pack(fill="both", expand=True, padx=12, pady=(6, 12))
@@ -292,7 +345,9 @@ def run_gui():
             self._busy = busy
             state = "disabled" if busy else "normal"
             try:
-                self.root.after(0, lambda: self.toggle_button.configure(state=state))
+                self.root.after(0, lambda: (
+                    self.toggle_button.configure(state=state),
+                    self.update_button.configure(state=state)))
             except Exception:
                 pass
 
@@ -310,6 +365,39 @@ def run_gui():
                 threading.Thread(target=self._disconnect_worker, daemon=True).start()
             else:
                 threading.Thread(target=self._connect_worker, daemon=True).start()
+
+        def on_update(self):
+            if self._busy:
+                return
+            threading.Thread(target=self._update_worker, daemon=True).start()
+
+        def _update_worker(self):
+            self._set_busy(True)
+            self.set_status("正在更新订阅…")
+            try:
+                node_count = update_subscription(self.log)
+                self.log(f"订阅更新成功：共 {node_count} 个节点")
+                if self.connected:
+                    self.log("正在重启内核以应用新节点（期间网络短暂中断）…")
+                    stop_mihomo()
+                    start_mihomo()
+                    if wait_ready():
+                        self.log("内核已重启，新节点已生效")
+                        self.set_status("已连接")
+                    else:
+                        stop_mihomo()
+                        disable_proxy()
+                        self.connected = False
+                        self.button_var.set("连接")
+                        self.set_status("订阅已更新，但内核重启失败，请重新连接")
+                        self.log("内核重启超时，已关闭系统代理，请重新连接")
+                else:
+                    self.set_status("未连接")
+            except Exception as exc:
+                self.log(f"订阅更新失败：{exc}")
+                self.set_status("订阅更新失败")
+            finally:
+                self._set_busy(False)
 
         def _connect_worker(self):
             self._set_busy(True)
@@ -466,6 +554,14 @@ def main():
     if os.name != "nt":
         print("本程序仅支持 Windows。")
         sys.exit(1)
+    if len(sys.argv) > 1 and sys.argv[1] == "--update":
+        try:
+            node_count = update_subscription()
+        except Exception as exc:
+            print(f"订阅更新失败：{exc}")
+            sys.exit(1)
+        print(f"订阅更新成功：共 {node_count} 个节点")
+        sys.exit(0)
     if not os.path.exists(MIHOMO_EXE):
         print(f"找不到内核文件：{MIHOMO_EXE}，请先下载 mihomo。")
         sys.exit(1)
